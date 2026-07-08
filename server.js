@@ -55,7 +55,8 @@ async function moderateRoom(roomId) {
     }
 
     if (!room.gameOver) {
-        setTimeout(() => moderateRoom(roomId), Math.random() * 10000 + 15000);
+        // Следующий бан через 20-30 секунд
+        setTimeout(() => moderateRoom(roomId), Math.random() * 10000 + 20000);
     }
 }
 
@@ -66,23 +67,25 @@ io.on('connection', (socket) => {
             users: {},
             messages: [],
             gameOver: false,
-            topic: "Обсуждаем, почему кошки лучше собак"
+            topic: "Обсуждаем, почему кошки лучше собак",
+            startTime: Date.now() + 60000 // Даем 60 секунд на сбор
         };
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
-        socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id });
+        socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
         
-        setTimeout(() => moderateRoom(roomId), 20000);
+        // Запускаем модерацию через 60 секунд
+        setTimeout(() => moderateRoom(roomId), 60000);
     });
 
     socket.on('joinRoom', ({ roomId, nickname }) => {
         if (!rooms[roomId]) return socket.emit('error', 'Комната не найдена!');
-        if (rooms[roomId].gameOver) return socket.emit('error', 'Игра уже закончена!');
+        if (rooms[roomId].gameOver) return socket.emit('error', 'Игра уже закончилась!');
 
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
-        socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id });
+        socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
     });
 
