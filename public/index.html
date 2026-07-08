@@ -50,6 +50,7 @@
             border-bottom: 1px solid var(--border-color); 
             text-align: center; 
             background: rgba(0,0,0,0.2);
+            flex-shrink: 0;
         }
         
         .header h1 { 
@@ -81,6 +82,14 @@
             justify-content: center; 
             flex-grow: 1; 
             gap: 15px;
+        }
+        
+        .warning {
+            font-size: 11px;
+            color: var(--neon-red);
+            text-align: center;
+            margin-bottom: 10px;
+            opacity: 0.8;
         }
         
         input { 
@@ -121,7 +130,7 @@
         
         .game-view { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
         
-        .users-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 15px; border-bottom: 1px solid var(--border-color); }
+        .users-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
         .user-badge { padding: 6px 12px; background: rgba(255,255,255,0.05); font-size: 12px; border-radius: 20px; border: 1px solid var(--border-color); transition: 0.3s; }
         .user-badge.banned { border-color: var(--neon-red); color: var(--neon-red); text-decoration: line-through; opacity: 0.5; background: rgba(255, 46, 99, 0.1); }
         
@@ -134,6 +143,8 @@
         .message.other { background: rgba(255,255,255,0.05); align-self: flex-start; border-bottom-left-radius: 2px; }
         .message.self { background: var(--neon-green); color: #000; align-self: flex-end; border-bottom-right-radius: 2px; }
         .message.self span { color: rgba(0,0,0,0.6); }
+        .message.system { text-align: center; font-size: 11px; color: var(--text-muted); background: transparent; align-self: center; padding: 5px; max-width: 90%; }
+        .message.system span { display: none; }
         
         .ban-message { 
             width: 100%; 
@@ -151,14 +162,14 @@
         
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 46, 99, 0.2); } 70% { box-shadow: 0 0 0 10px rgba(255, 46, 99, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 46, 99, 0); } }
         
-        .input-area { display: flex; padding: 15px; border-top: 1px solid var(--border-color); gap: 10px; background: rgba(0,0,0,0.2); }
+        .input-area { display: flex; padding: 15px; border-top: 1px solid var(--border-color); gap: 10px; background: rgba(0,0,0,0.2); flex-shrink: 0; }
         .input-area input { flex-grow: 1; margin: 0; }
         .input-area button { width: auto; padding: 0 20px; margin: 0; }
         
-        .error { color: var(--neon-red); font-size: 12px; text-align: center; }
+        .error { color: var(--neon-red); font-size: 12px; text-align: center; min-height: 15px; }
         
         .modal { 
-            position: fixed; /* Фиксируем относительно экрана */
+            position: fixed; 
             top: 0; left: 0; width: 100%; height: 100%; 
             background: rgba(10, 11, 16, 0.9); 
             backdrop-filter: blur(5px);
@@ -180,6 +191,7 @@
             <p>Выживи в чате с безумным ИИ</p>
         </div>
         <div class="lobby">
+            <div class="warning">⚠️ Важно: не обновляйте страницу после создания комнаты!</div>
             <input type="text" id="nickname" placeholder="Введи свой ник" maxlength="12">
             <button onclick="createRoom()">Создать комнату</button>
             <div class="divider"></div>
@@ -243,8 +255,10 @@
             timerInterval = setInterval(updateTimer, 1000);
         });
 
-        socket.on('error', (msg) => {
-            document.getElementById('error').innerText = msg;
+        socket.on('appError', (msg) => {
+            const errDiv = document.getElementById('error');
+            errDiv.innerText = msg;
+            setTimeout(() => { errDiv.innerText = ''; }, 3000); // Ошибка исчезает через 3 сек
         });
 
         socket.on('updateUsers', (users) => {
@@ -261,8 +275,15 @@
         socket.on('newMessage', (msg) => {
             const box = document.getElementById('chatBox');
             const div = document.createElement('div');
-            div.className = 'message ' + (msg.id === myId ? 'self' : 'other');
-            div.innerHTML = `<span>${msg.name}</span>${msg.text}`;
+            
+            if (msg.id === 'system') {
+                div.className = 'message system';
+                div.innerText = msg.text;
+            } else {
+                div.className = 'message ' + (msg.id === myId ? 'self' : 'other');
+                div.innerHTML = `<span>${msg.name}</span>${msg.text}`;
+            }
+            
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
         });
@@ -276,13 +297,12 @@
             box.scrollTop = box.scrollHeight;
 
             if (data.id === myId) {
-                // Задержка 3 секунды, чтобы игрок успел прочитать причину в чате
                 setTimeout(() => {
                     document.getElementById('gameOverTitle').innerText = "ВЫ ЗАБАНЕНЫ";
                     document.getElementById('gameOverTitle').style.color = "var(--neon-red)";
                     document.getElementById('gameOverText').innerText = `ИИ решил, что вы: ${data.reason}`;
                     document.getElementById('gameOverModal').style.display = 'flex';
-                }, 3000);
+                }, 3000); // 3 секунды чтобы прочитать причину
             }
         });
 
@@ -292,7 +312,7 @@
                 document.getElementById('gameOverTitle').style.color = "var(--neon-green)";
                 document.getElementById('gameOverText').innerText = `Последний выживший: ${winner}`;
                 document.getElementById('gameOverModal').style.display = 'flex';
-            }, 1000); // Небольшая задержка, чтобы увидеть последний бан
+            }, 1000);
         });
 
         function createRoom() {
