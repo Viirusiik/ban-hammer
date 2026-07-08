@@ -43,6 +43,7 @@
             flex-direction: column; 
             overflow: hidden;
             box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            position: relative;
         }
         
         .header { 
@@ -147,32 +148,43 @@
         .message.system span { display: none; }
         
         .ban-message { 
-            width: 100%; 
+            width: 90%; 
             text-align: center; 
-            background: rgba(255, 46, 99, 0.1); 
-            border: 1px solid var(--neon-red); 
-            color: var(--neon-red); 
-            padding: 15px; 
-            border-radius: 10px; 
+            background: linear-gradient(45deg, rgba(255, 46, 99, 0.2), rgba(255, 46, 99, 0.05)); 
+            border: 2px solid var(--neon-red); 
+            color: #fff; 
+            padding: 20px; 
+            border-radius: 12px; 
             font-weight: 700; 
-            font-size: 14px; 
-            margin: 10px 0;
-            animation: pulse 1s infinite;
+            font-size: 16px; 
+            margin: 15px 0;
+            align-self: center;
+            box-shadow: 0 0 20px rgba(255, 46, 99, 0.2);
         }
-        
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 46, 99, 0.2); } 70% { box-shadow: 0 0 0 10px rgba(255, 46, 99, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 46, 99, 0); } }
+        .ban-message b { color: var(--neon-red); display: block; font-size: 18px; margin-bottom: 10px; }
         
         .input-area { display: flex; padding: 15px; border-top: 1px solid var(--border-color); gap: 10px; background: rgba(0,0,0,0.2); flex-shrink: 0; }
         .input-area input { flex-grow: 1; margin: 0; }
         .input-area button { width: auto; padding: 0 20px; margin: 0; }
+        
+        .banned-overlay {
+            padding: 15px;
+            text-align: center;
+            background: rgba(255, 46, 99, 0.1);
+            border-top: 1px solid var(--neon-red);
+            color: var(--neon-red);
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
         
         .error { color: var(--neon-red); font-size: 12px; text-align: center; min-height: 15px; }
         
         .modal { 
             position: fixed; 
             top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(10, 11, 16, 0.9); 
-            backdrop-filter: blur(5px);
+            background: rgba(10, 11, 16, 0.95); 
+            backdrop-filter: blur(10px);
             display: none; 
             justify-content: center; align-items: center; flex-direction: column; 
             z-index: 100; 
@@ -211,16 +223,16 @@
         <div class="game-view">
             <div class="users-list" id="usersList"></div>
             <div class="chat-box" id="chatBox"></div>
-            <div class="input-area">
+            <div class="input-area" id="inputArea">
                 <input type="text" id="messageInput" placeholder="Пиши сообщение..." onkeypress="if(event.key==='Enter') sendMessage()">
                 <button onclick="sendMessage()">➤</button>
             </div>
         </div>
     </div>
 
-    <!-- Экран смерти/победы -->
+    <!-- Экран конца игры -->
     <div class="modal" id="gameOverModal">
-        <h2 id="gameOverTitle">ВЫ ЗАБАНЕНЫ</h2>
+        <h2 id="gameOverTitle">ИГРА ОКОНЧЕНА</h2>
         <p id="gameOverText"></p>
         <button onclick="location.reload()" style="width: auto; padding: 15px 40px;">Выйти</button>
     </div>
@@ -230,6 +242,28 @@
         const socket = io();
         let myId = null;
         let timerInterval = null;
+        let audioCtx = null;
+
+        // Инициализация звуков
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(freq, duration, type = 'sine', volume = 0.1) {
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = type;
+            oscillator.frequency.value = freq;
+            gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + duration);
+        }
 
         socket.on('roomJoined', (data) => {
             myId = data.userId;
@@ -238,7 +272,6 @@
             document.getElementById('roomIdDisplay').innerText = data.roomId;
             document.getElementById('topicDisplay').innerText = data.topic;
             
-            // Запуск таймера
             if (timerInterval) clearInterval(timerInterval);
             const updateTimer = () => {
                 const msLeft = data.startTime - Date.now();
@@ -249,6 +282,9 @@
                 } else {
                     const sec = Math.floor(msLeft / 1000);
                     document.getElementById('timerDisplay').innerText = `ИИ проснется через: ${sec} сек`;
+                    if (sec <= 5 && sec > 0) {
+                        playSound(1000, 0.05, 'square', 0.05); // Тик таймера
+                    }
                 }
             };
             updateTimer();
@@ -258,7 +294,7 @@
         socket.on('appError', (msg) => {
             const errDiv = document.getElementById('error');
             errDiv.innerText = msg;
-            setTimeout(() => { errDiv.innerText = ''; }, 3000); // Ошибка исчезает через 3 сек
+            setTimeout(() => { errDiv.innerText = ''; }, 3000);
         });
 
         socket.on('updateUsers', (users) => {
@@ -282,6 +318,7 @@
             } else {
                 div.className = 'message ' + (msg.id === myId ? 'self' : 'other');
                 div.innerHTML = `<span>${msg.name}</span>${msg.text}`;
+                if (msg.id !== myId) playSound(800, 0.1, 'sine', 0.05); // Звук чужого сообщения
             }
             
             box.appendChild(div);
@@ -292,23 +329,26 @@
             const box = document.getElementById('chatBox');
             const div = document.createElement('div');
             div.className = 'ban-message';
-            div.innerHTML = `🚫 ${data.name} ЗАБАНЕН!<br><br>Причина: ${data.reason}`;
+            div.innerHTML = `<b>🚫 ${data.name} ЗАБАНЕН!</b> Причина: ${data.reason}`;
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
 
             if (data.id === myId) {
-                setTimeout(() => {
-                    document.getElementById('gameOverTitle').innerText = "ВЫ ЗАБАНЕНЫ";
-                    document.getElementById('gameOverTitle').style.color = "var(--neon-red)";
-                    document.getElementById('gameOverText').innerText = `ИИ решил, что вы: ${data.reason}`;
-                    document.getElementById('gameOverModal').style.display = 'flex';
-                }, 3000); // 3 секунды чтобы прочитать причину
+                // Меня забанили
+                playSound(150, 0.8, 'sawtooth', 0.2); // Звук моего бана
+                document.getElementById('inputArea').innerHTML = '<div class="banned-overlay">ВЫ ЗАБАНЕНЫ! <br>Наблюдайте за оставшимися.</div>';
+            } else {
+                // Забанили кого-то другого
+                playSound(400, 0.3, 'triangle', 0.1); // Звук чужого бана
             }
         });
 
         socket.on('gameOver', (winner) => {
             setTimeout(() => {
-                document.getElementById('gameOverTitle').innerText = "ПОБЕДА!";
+                playSound(500, 0.2, 'sine', 0.1);
+                setTimeout(() => playSound(700, 0.3, 'sine', 0.1), 200);
+                
+                document.getElementById('gameOverTitle').innerText = "ИГРА ОКОНЧЕНА";
                 document.getElementById('gameOverTitle').style.color = "var(--neon-green)";
                 document.getElementById('gameOverText').innerText = `Последний выживший: ${winner}`;
                 document.getElementById('gameOverModal').style.display = 'flex';
@@ -316,12 +356,14 @@
         });
 
         function createRoom() {
+            initAudio(); // Включаем звук по клику (требование браузеров)
             const nick = document.getElementById('nickname').value.trim();
             if (!nick) return alert("Введи ник!");
             socket.emit('createRoom', nick);
         }
 
         function joinRoom() {
+            initAudio();
             const nick = document.getElementById('nickname').value.trim();
             const code = document.getElementById('roomCode').value.trim();
             if (!nick || !code) return alert("Введи ник и код!");
@@ -334,6 +376,7 @@
             if (text) {
                 socket.emit('sendMessage', text);
                 input.value = '';
+                playSound(1200, 0.05, 'sine', 0.05); // Звук отправки сообщения
             }
         }
     </script>
