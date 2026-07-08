@@ -30,28 +30,51 @@ async function moderateRoom(roomId) {
     Вот история чата:\n${history}\n
     Выбери одного юзера и придумай смешную причину бана. Ответь СТРОГО в формате JSON без markdown: {"username": "имя_юзера", "reason": "причина"}`;
 
+    let banReason = "ИИ забыл причину, но банит просто так.";
+    let targetId = null;
+
     try {
         const response = await fetch(`${AI_API_URL}${encodeURIComponent(prompt)}`);
         let data = await response.text();
-        data = data.replace(/```json/g, '').replace(/```/g, '').trim();
-        const banData = JSON.parse(data);
         
-        const targetId = Object.keys(room.users).find(id => room.users[id].name === banData.username);
-        
-        if (targetId && !room.users[targetId].banned) {
-            room.users[targetId].banned = true;
-            io.to(roomId).emit('ban', { id: targetId, name: banData.username, reason: banData.reason });
+        // Жестко вырезаем JSON из ответа
+        const match = data.match(/\{.*\}/s);
+        if (match) {
+            data = match[0];
+            const banData = JSON.parse(data);
             
-            const alive = Object.keys(room.users).filter(id => !room.users[id].banned);
-            if (alive.length === 1) {
-                room.gameOver = true;
-                io.to(roomId).emit('gameOver', room.users[alive[0]].name);
+            banReason = banData.reason || banReason;
+            targetId = Object.keys(room.users).find(id => room.users[id].name === banData.username);
+            
+            // Если ИИ придумал несуществующего юзера, баним случайного, но причину оставляем
+            if (!targetId) {
+                targetId = players[Math.floor(Math.random() * players.length)];
             }
+        } else {
+            throw new Error("Неверный формат ИИ");
         }
     } catch (e) {
-        const randomId = players[Math.floor(Math.random() * players.length)];
-        room.users[randomId].banned = true;
-        io.to(roomId).emit('ban', { id: randomId, name: room.users[randomId].name, reason: "Сбой матрицы. ИИ запутался в проводах." });
+        // Если ИИ полностью сломался, баним случайного со своей причиной
+        targetId = players[Math.floor(Math.random() * players.length)];
+        const fallbackReasons = [
+            "Сбой матрицы. ИИ запутался в проводах.",
+            "Похоже на бота. Бан без суда.",
+            "Слишком скучно пишешь. Бан.",
+            "ИИ просто не понравилось твое лицо (ник)."
+        ];
+        banReason = fallbackReasons[Math.floor(Math.random() * fallbackReasons.length)];
+    }
+
+    if (targetId && !room.users[targetId].banned) {
+        room.users[targetId].banned = true;
+        const bannedName = room.users[targetId].name;
+        io.to(roomId).emit('ban', { id: targetId, name: bannedName, reason: banReason });
+        
+        const alive = Object.keys(room.users).filter(id => !room.users[id].banned);
+        if (alive.length === 1) {
+            room.gameOver = true;
+            io.to(roomId).emit('gameOver', room.users[alive[0]].name);
+        }
     }
 
     if (!room.gameOver) {
@@ -73,7 +96,7 @@ io.on('connection', (socket) => {
         };
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
-        socket.data.roomId = roomId; // Запоминаем комнату игрока
+        socket.data.roomId = roomId;
         
         socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
@@ -83,17 +106,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('joinRoom', ({ roomId, nickname }) => {
-        roomId = (roomId || '').trim(); // Удаляем пробелы на всякий случай
-        if (!rooms[roomId]) {
-            return socket.emit('appError', 'Комната не найдена! Проверьте код.');
-        }
-        if (rooms[roomId].gameOver) {
-            return socket.emit('appError', 'Игра в этой комнате уже закончилась!');
-        }
+        roomId = (roomId || '').trim();
+        if (!rooms[roomId]) return socket.emit('appError', 'Комната не найдена! Проверьте код.');
+        if (rooms[roomId].gameOver) return socket.emit('appError', 'Игра в этой комнате уже закончилась!');
 
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
-        socket.data.roomId = roomId; // Запоминаем комнату игрока
+        socket.data.roomId = roomId;
         
         socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
@@ -118,9 +137,7 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
             io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `${name} отключился.` });
             
-            if (Object.keys(rooms[roomId].users).length === 0) {
-                delete rooms[roomId]; // Удаляем пустую комнату
-            }
+            if (Object.keys(rooms[roomId].users).length === 0) delete rooms[roomId];
         }
     });
 });
