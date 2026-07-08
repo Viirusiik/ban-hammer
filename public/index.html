@@ -163,9 +163,27 @@
         }
         .ban-message b { color: var(--neon-red); display: block; font-size: 18px; margin-bottom: 10px; }
         
-        .input-area { display: flex; padding: 15px; border-top: 1px solid var(--border-color); gap: 10px; background: rgba(0,0,0,0.2); flex-shrink: 0; min-height: 65px; align-items: center; }
-        .input-area input { flex-grow: 1; margin: 0; }
-        .input-area button { width: auto; padding: 0 20px; margin: 0; }
+        .input-area { 
+            display: flex; 
+            padding: 15px; 
+            border-top: 1px solid var(--border-color); 
+            gap: 10px; 
+            background: rgba(0,0,0,0.2); 
+            flex-shrink: 0; 
+            align-items: stretch; /* Фикс кнопки */
+        }
+        .input-area input { flex-grow: 1; margin: 0; height: 50px; }
+        .input-area button { 
+            width: 50px; 
+            min-width: 50px; 
+            height: 50px; 
+            margin: 0; 
+            padding: 0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 18px;
+        }
         
         .banned-overlay {
             padding: 15px;
@@ -263,7 +281,6 @@
             osc.stop(audioCtx.currentTime + duration);
         }
 
-        // Функция запуска таймера (переиспользуемая)
         function startTimer(startTime) {
             if (timerInterval) clearInterval(timerInterval);
             const updateTimer = () => {
@@ -296,7 +313,6 @@
             startTimer(data.startTime);
         });
 
-        // Новый раунд после бана
         socket.on('newRound', (data) => {
             document.getElementById('topicDisplay').innerText = data.topic;
             startTimer(data.startTime);
