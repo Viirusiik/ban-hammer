@@ -33,13 +33,16 @@ async function moderateRoom(roomId) {
         return;
     }
 
-    const history = room.messages.slice(-10).map(m => `${room.users[m.id]?.name || 'Unknown'}: ${m.text}`).join('\n');
+    const history = room.messages.slice(-15).map(m => `${room.users[m.id]?.name || 'Unknown'}: ${m.text}`).join('\n');
+    const playersList = players.map(id => room.users[id].name).join(', ');
     
-    // ИИ придумывает бан И новую тему
-    const prompt = `Ты — сумасшедший ИИ-модератор чата. Твоя цель — забанить одного из участников за максимально абсурдную, смешную и нелепую причину. 
-    Вот история чата:\n${history}\n
-    Выбери одного юзера, придумай смешную причину бана, а также придумай абсолютно новую абсурдную тему для обсуждения на следующий раунд. 
-    Ответь СТРОКОЙ в формате JSON без markdown: {"username": "имя_юзера", "reason": "причина", "next_topic": "новая тема"}`;
+    // Новый промпт: логика, мат, сарказм
+    const prompt = `Ты — дерзкий, саркастичный ИИ-модератор чата. Твоя задача — анализировать сообщения пользователей и банить того, кто больше всего бесит: пишет не по теме, спамит рандомными буквами, слишком скучно, слишком душно или просто тупит. 
+    Разрешено использовать мат, сарказм и интернет-сленг. Причина бана должна быть смешной, логичной и бьющей точно в цель.
+    Доступные юзеры для бана: ${playersList}.
+    История чата:\n${history}\n
+    Выбери ОДНОГО юзера из списка выше, придумай едкую причину бана, а также придумай новую безумную тему для следующего раунда. 
+    Ответь СТРОКОЙ в формате JSON без markdown: {"username": "имя_юзера", "reason": "причина", "next_topic": "новая_тема"}`;
 
     let banReason = "ИИ забыл причину, но банит просто так.";
     let targetId = null;
@@ -56,8 +59,13 @@ async function moderateRoom(roomId) {
             
             banReason = banData.reason || banReason;
             nextTopic = banData.next_topic || nextTopic;
-            targetId = Object.keys(room.users).find(id => room.users[id].name === banData.username);
             
+            // Ищем юзера (сравниваем без учета регистра, чтобы ИИ не ошибся)
+            targetId = Object.keys(room.users).find(id => 
+                room.users[id].name.toLowerCase() === (banData.username || '').toLowerCase().trim()
+            );
+            
+            // Если ИИ ошибся ником, баним того, кто меньше всего писал
             if (!targetId) {
                 targetId = players[Math.floor(Math.random() * players.length)];
             }
@@ -67,10 +75,10 @@ async function moderateRoom(roomId) {
     } catch (e) {
         targetId = players[Math.floor(Math.random() * players.length)];
         const fallbackReasons = [
-            "Сбой матрицы. ИИ запутался в проводах.",
-            "Похоже на бота. Бан без суда.",
-            "Слишком скучно пишешь. Бан.",
-            "ИИ просто не понравилось твое лицо (ник)."
+            "Слишком тихо сидишь. Подозрительно.",
+            "Твой вайб просто отвратителен сегодня.",
+            "ИИ решил, что ты душнила. Бан.",
+            "Пишешь так, будто тебя заставили. Увольняю."
         ];
         banReason = fallbackReasons[Math.floor(Math.random() * fallbackReasons.length)];
     }
@@ -82,22 +90,18 @@ async function moderateRoom(roomId) {
         
         const alive = Object.keys(room.users).filter(id => !room.users[id].banned);
         
-        // Если остался 1 человек - конец игры
         if (alive.length === 1) {
             room.gameOver = true;
             io.to(roomId).emit('gameOver', room.users[alive[0]].name);
         } else {
-            // Если игра продолжается - запускаем новый раунд
             room.topic = nextTopic;
             room.startTime = Date.now() + ROUND_TIME;
-            room.messages = []; // Очищаем историю для новой темы
+            room.messages = []; 
             
-            // Отправляем всем новое время и тему
             io.to(roomId).emit('newRound', { topic: room.topic, startTime: room.startTime });
             io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `🚨 НОВЫЙ РАУНД! Тема: ${room.topic}` });
             io.to(roomId).emit('updateUsers', Object.values(room.users));
             
-            // Запускаем следующий бан ровно через 90 секунд
             setTimeout(() => moderateRoom(roomId), ROUND_TIME);
         }
     }
@@ -125,7 +129,6 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
         io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `Комната создана. Код: ${roomId}. Ждем игроков!` });
         
-        // Первый бан через 90 секунд
         setTimeout(() => moderateRoom(roomId), ROUND_TIME);
     });
 
@@ -159,7 +162,7 @@ io.on('connection', (socket) => {
             const name = rooms[roomId].users[socket.id].name;
             delete rooms[roomId].users[socket.id];
             io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
-            io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `${name} отключился.` });
+            io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `${name} сбежал.` });
             
             if (Object.keys(rooms[roomId].users).length === 0) delete rooms[roomId];
         }
