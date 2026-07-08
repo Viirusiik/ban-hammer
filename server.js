@@ -55,12 +55,13 @@ async function moderateRoom(roomId) {
     }
 
     if (!room.gameOver) {
-        // Следующий бан через 20-30 секунд
         setTimeout(() => moderateRoom(roomId), Math.random() * 10000 + 20000);
     }
 }
 
 io.on('connection', (socket) => {
+    console.log('Новый игрок подключился:', socket.id);
+
     socket.on('createRoom', (nickname) => {
         const roomId = Math.floor(1000 + Math.random() * 9000).toString();
         rooms[roomId] = {
@@ -68,42 +69,57 @@ io.on('connection', (socket) => {
             messages: [],
             gameOver: false,
             topic: "Обсуждаем, почему кошки лучше собак",
-            startTime: Date.now() + 60000 // Даем 60 секунд на сбор
+            startTime: Date.now() + 60000
         };
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
+        socket.data.roomId = roomId; // Запоминаем комнату игрока
+        
         socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
+        io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `Комната создана. Код: ${roomId}. Ждем игроков!` });
         
-        // Запускаем модерацию через 60 секунд
         setTimeout(() => moderateRoom(roomId), 60000);
     });
 
     socket.on('joinRoom', ({ roomId, nickname }) => {
-        if (!rooms[roomId]) return socket.emit('error', 'Комната не найдена!');
-        if (rooms[roomId].gameOver) return socket.emit('error', 'Игра уже закончилась!');
+        roomId = (roomId || '').trim(); // Удаляем пробелы на всякий случай
+        if (!rooms[roomId]) {
+            return socket.emit('appError', 'Комната не найдена! Проверьте код.');
+        }
+        if (rooms[roomId].gameOver) {
+            return socket.emit('appError', 'Игра в этой комнате уже закончилась!');
+        }
 
         socket.join(roomId);
         rooms[roomId].users[socket.id] = { name: nickname, banned: false };
+        socket.data.roomId = roomId; // Запоминаем комнату игрока
+        
         socket.emit('roomJoined', { roomId, topic: rooms[roomId].topic, userId: socket.id, startTime: rooms[roomId].startTime });
         io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
+        io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `${nickname} зашел в комнату.` });
     });
 
     socket.on('sendMessage', (text) => {
-        const roomId = Object.keys(rooms).find(id => rooms[id].users[socket.id]);
-        if (!roomId || rooms[roomId].users[socket.id].banned || rooms[roomId].gameOver) return;
+        const roomId = socket.data.roomId;
+        if (!roomId || !rooms[roomId] || !rooms[roomId].users[socket.id]) return;
+        
+        if (rooms[roomId].users[socket.id].banned || rooms[roomId].gameOver) return;
         
         rooms[roomId].messages.push({ id: socket.id, text });
         io.to(roomId).emit('newMessage', { id: socket.id, name: rooms[roomId].users[socket.id].name, text });
     });
 
     socket.on('disconnect', () => {
-        for (const roomId in rooms) {
-            if (rooms[roomId].users[socket.id]) {
-                delete rooms[roomId].users[socket.id];
-                io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
-                if (Object.keys(rooms[roomId].users).length === 0) delete rooms[roomId];
-                break;
+        const roomId = socket.data.roomId;
+        if (roomId && rooms[roomId] && rooms[roomId].users[socket.id]) {
+            const name = rooms[roomId].users[socket.id].name;
+            delete rooms[roomId].users[socket.id];
+            io.to(roomId).emit('updateUsers', Object.values(rooms[roomId].users));
+            io.to(roomId).emit('newMessage', { id: 'system', name: 'Система', text: `${name} отключился.` });
+            
+            if (Object.keys(rooms[roomId].users).length === 0) {
+                delete rooms[roomId]; // Удаляем пустую комнату
             }
         }
     });
