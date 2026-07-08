@@ -67,14 +67,14 @@
         
         .timer {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
+            font-size: 16px;
             color: var(--neon-red);
             margin-top: 8px;
             font-weight: 700;
         }
         
-        .topic { color: var(--text-muted); font-size: 13px; margin-top: 8px; }
-        .topic span { color: var(--text-main); font-weight: 500; }
+        .topic { color: var(--text-muted); font-size: 13px; margin-top: 8px; line-height: 1.4; }
+        .topic span { color: var(--neon-green); font-weight: 500; font-size: 15px; display: block; margin-top: 2px; }
         
         .lobby { 
             padding: 30px; 
@@ -144,7 +144,7 @@
         .message.other { background: rgba(255,255,255,0.05); align-self: flex-start; border-bottom-left-radius: 2px; }
         .message.self { background: var(--neon-green); color: #000; align-self: flex-end; border-bottom-right-radius: 2px; }
         .message.self span { color: rgba(0,0,0,0.6); }
-        .message.system { text-align: center; font-size: 11px; color: var(--text-muted); background: transparent; align-self: center; padding: 5px; max-width: 90%; }
+        .message.system { text-align: center; font-size: 12px; color: var(--neon-green); background: rgba(0, 255, 157, 0.05); align-self: center; padding: 8px 15px; max-width: 90%; border-radius: 10px; border: 1px solid rgba(0, 255, 157, 0.1); }
         .message.system span { display: none; }
         
         .ban-message { 
@@ -218,7 +218,7 @@
     <div class="container" id="game" style="display: none;">
         <div class="header">
             <h1>Комната: <span id="roomIdDisplay"></span></h1>
-            <div class="topic">Тема: <span id="topicDisplay"></span></div>
+            <div class="topic">Тема для обсуждения: <span id="topicDisplay"></span></div>
             <div class="timer" id="timerDisplay"></div>
         </div>
         <div class="game-view">
@@ -245,25 +245,46 @@
         let timerInterval = null;
         let audioCtx = null;
 
-        // Инициализация звуков
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
 
         function playSound(freq, duration, type = 'sine', volume = 0.1) {
             if (!audioCtx) return;
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.type = type;
-            oscillator.frequency.value = freq;
-            gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + duration);
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = type;
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        // Функция запуска таймера (переиспользуемая)
+        function startTimer(startTime) {
+            if (timerInterval) clearInterval(timerInterval);
+            const updateTimer = () => {
+                const msLeft = startTime - Date.now();
+                const timerEl = document.getElementById('timerDisplay');
+                
+                if (msLeft <= 0) {
+                    timerEl.innerText = "⚠️ ИИ АКТИВЕН ⚠️";
+                    timerEl.style.color = "var(--neon-green)";
+                    clearInterval(timerInterval);
+                } else {
+                    const sec = Math.floor(msLeft / 1000);
+                    const mins = Math.floor(sec / 60);
+                    const secs = sec % 60;
+                    timerEl.innerText = `Следующий бан через: 0${mins}:${secs < 10 ? '0' + secs : secs}`;
+                    timerEl.style.color = "var(--neon-red)";
+                    if (sec <= 5 && sec > 0) playSound(1000, 0.05, 'square', 0.05);
+                }
+            };
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
         }
 
         socket.on('roomJoined', (data) => {
@@ -272,24 +293,13 @@
             document.getElementById('game').style.display = 'flex';
             document.getElementById('roomIdDisplay').innerText = data.roomId;
             document.getElementById('topicDisplay').innerText = data.topic;
-            
-            if (timerInterval) clearInterval(timerInterval);
-            const updateTimer = () => {
-                const msLeft = data.startTime - Date.now();
-                if (msLeft <= 0) {
-                    document.getElementById('timerDisplay').innerText = "⚠️ ИИ АКТИВЕН ⚠️";
-                    document.getElementById('timerDisplay').style.color = "var(--neon-green)";
-                    clearInterval(timerInterval);
-                } else {
-                    const sec = Math.floor(msLeft / 1000);
-                    document.getElementById('timerDisplay').innerText = `ИИ проснется через: ${sec} сек`;
-                    if (sec <= 5 && sec > 0) {
-                        playSound(1000, 0.05, 'square', 0.05);
-                    }
-                }
-            };
-            updateTimer();
-            timerInterval = setInterval(updateTimer, 1000);
+            startTimer(data.startTime);
+        });
+
+        // Новый раунд после бана
+        socket.on('newRound', (data) => {
+            document.getElementById('topicDisplay').innerText = data.topic;
+            startTimer(data.startTime);
         });
 
         socket.on('appError', (msg) => {
@@ -327,7 +337,6 @@
         });
 
         socket.on('ban', (data) => {
-            // 1. Показываем в чате
             const box = document.getElementById('chatBox');
             const div = document.createElement('div');
             div.className = 'ban-message';
@@ -335,10 +344,8 @@
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
 
-            // 2. Если забанили меня
             if (data.id === myId) {
                 playSound(150, 0.8, 'sawtooth', 0.2);
-                // Заменяем поле ввода на причину бана
                 document.getElementById('inputArea').innerHTML = `
                     <div class="banned-overlay">
                         ВЫ ЗАБАНЕНЫ! <br>
@@ -347,7 +354,6 @@
                     </div>
                 `;
             } else {
-                // Забанили другого
                 playSound(400, 0.3, 'triangle', 0.1);
             }
         });
@@ -381,8 +387,7 @@
 
         function sendMessage() {
             const input = document.getElementById('messageInput');
-            if (!input) return; // Если поле уже удалено (мы забанены)
-            
+            if (!input) return;
             const text = input.value.trim();
             if (text) {
                 socket.emit('sendMessage', text);
